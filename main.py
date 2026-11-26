@@ -1,97 +1,86 @@
 #!/usr/bin/env python3
-"""The Worst Pizza Topping.
+"""Pitch the worst pizza topping ever invented.
 
-Writes one funny line pitching a terrible pizza topping to
-/output/entry.txt (the path the make.fun program/v1 harness grades).
-
-The line pitches wet cardboard as a pizza topping: it opens like a
-new-product announcement, then the punchline turns the topping into
-the box the pizza came in — the topping is literally the packaging,
-which is why it tastes exactly like it.
+Running this script drops a single joke line about a pizza topping
+into the file the make.fun grader reads, /output/entry.txt. The joke
+sells wet cardboard as the newest topping: the twist is that the
+topping tastes exactly like the delivery box, because it *is* the
+delivery box. Before writing anything the script measures the line
+against the contest's limits, and after writing it reads the file
+back to make sure nothing got mangled on the way to disk.
 """
+
+from __future__ import annotations
 
 import argparse
 import os
 import sys
+from pathlib import Path
 
-# The pitch, kept as one line of plain text.
-PITCH = ("New pizza topping: wet cardboard — it tastes exactly like the "
-         "box it came in, because it is the box it came in.")
+LINE = (
+    "New pizza topping: wet cardboard — it tastes exactly like the box "
+    "it came in, because it is the box it came in."
+)
 
-DEFAULT_OUTPUT = "/output/entry.txt"
-
-
-def build_pitch() -> str:
-    """Return the single topping pitch line."""
-    return PITCH
+FALLBACK_PATH = Path("/output/entry.txt")
+MAX_CHARS = 200
 
 
-def parse_args(argv=None):
-    """Command-line options for local runs and debugging."""
+def gate_ok(text: str) -> str | None:
+    """Check `text` against the contest limits.
+
+    Returns a short description of the first problem found, or None
+    when the line is good to go.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return "line is blank"
+    if len(text.encode("utf-8")) > MAX_CHARS:
+        return f"line is {len(text.encode('utf-8'))} bytes, over the {MAX_CHARS} limit"
+    if "\n" in stripped or "\r" in stripped:
+        return "line must fit on one line"
+    return None
+
+
+def parse_cli() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Write the worst-pizza-topping pitch to entry.txt.")
-    parser.add_argument(
-        "--output", default=None,
-        help="where to write the pitch (default: $ENTRY_OUTPUT or "
-             "/output/entry.txt)")
-    parser.add_argument(
-        "--print", action="store_true",
-        help="also print the pitch to stdout instead of only writing it")
-    return parser.parse_args(argv)
+    parser.add_argument("--output", metavar="PATH",
+                        help="destination file (overrides $ENTRY_OUTPUT)")
+    parser.add_argument("--print", action="store_true",
+                        help="echo the pitch to stdout as well")
+    return parser.parse_args()
 
 
-def check_pitch(pitch: str) -> list:
-    """Return a list of gate problems; empty means the pitch is valid.
+def run() -> int:
+    args = parse_cli()
 
-    Mirrors the competition gate: 1-200 UTF-8 characters, not only
-    whitespace, a single line of plain text.
-    """
-    problems = []
-    if not pitch.strip():
-        problems.append("pitch is empty or only whitespace")
-    if not (1 <= len(pitch.encode("utf-8")) <= 200):
-        problems.append(
-            f"pitch is {len(pitch.encode('utf-8'))} bytes, outside 1-200")
-    if "\n" in pitch.strip():
-        problems.append("pitch must be a single line")
-    return problems
-
-
-def main(argv=None) -> int:
-    args = parse_args(argv)
-    pitch = build_pitch()
-
-    problems = check_pitch(pitch)
-    if problems:
-        for problem in problems:
-            print(f"gate check failed: {problem}", file=sys.stderr)
+    problem = gate_ok(LINE)
+    if problem is not None:
+        print(f"gate failed: {problem}", file=sys.stderr)
         return 1
 
     if args.print:
-        print(pitch)
+        print(LINE)
 
-    output = args.output or os.environ.get("ENTRY_OUTPUT", DEFAULT_OUTPUT)
-    os.makedirs(os.path.dirname(output), exist_ok=True)
-    with open(output, "w", encoding="utf-8") as handle:
-        handle.write(pitch + "\n")
+    target = Path(args.output) if args.output else Path(
+        os.environ.get("ENTRY_OUTPUT", FALLBACK_PATH))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(LINE + "\n", encoding="utf-8")
 
-    # Read the file back and verify it holds exactly the pitch.
-    with open(output, "r", encoding="utf-8") as handle:
-        written = handle.read()
-    if written != pitch + "\n":
-        print("read-back check failed: file does not match the pitch",
+    saved = target.read_text(encoding="utf-8")
+    if saved != LINE + "\n":
+        print("verification failed: file content differs from the pitch",
               file=sys.stderr)
         return 1
-    readback_problems = check_pitch(written.strip())
-    if readback_problems:
-        for problem in readback_problems:
-            print(f"read-back gate check failed: {problem}", file=sys.stderr)
+    problem = gate_ok(saved.strip())
+    if problem is not None:
+        print(f"verification failed: {problem}", file=sys.stderr)
         return 1
 
-    print(f"wrote {len(pitch.split())}-word pitch to {output} "
-          f"({len(pitch)} chars, read-back verified)")
+    print(f"done: {len(LINE)}-char pitch written to {target} and verified")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())
